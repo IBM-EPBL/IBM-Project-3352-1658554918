@@ -7,8 +7,8 @@ Please Check the stock list and refill the stock'''
 
 #The mail addresses and password
 def email_alert(receiver_address):
-    sender_address = 'inventorymangement.a@gmail.com'
-    sender_pass = '@Rehman2002'
+    sender_address = 'srihariharan621@psnacet.edu.in'
+    sender_pass = 'hari@2002H'
     # Comment out, utterly pointless
     # receiver_address = receiver_address
 
