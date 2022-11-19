@@ -1,401 +1,637 @@
-from flask import Flask, render_template, request, redirect, url_for, session, flash, Response
-from flask_mysqldb import MySQL
-import MySQLdb.cursors
-import re
-from sendemail import email_alert
-import io
-import xlwt
-import pymysql
+from flask import Flask, render_template, flash, redirect, url_for, session, request, logging
+from wtforms import Form, StringField, TextAreaField, PasswordField, validators, SelectField, IntegerField
+import ibm_db
+from passlib.hash import sha256_crypt
+from functools import wraps
 
+from sendgrid import *
+
+#creating an app instance
 app = Flask(__name__)
 
-app.secret_key = 'a'
+app.secret_key='a'
 
-# database connection details
-app.config['MYSQL_HOST'] = 'remotemysql.com'
-app.config['MYSQL_USER'] = '8GTABQ1kXu'
-app.config['MYSQL_PASSWORD'] = 'jCJoTT72Ji'
-app.config['MYSQL_DB'] = '8GTABQ1kXu'
+conn = ibm_db.connect("DATABASE=bludb;HOSTNAME=21fecfd8-47b7-4937-840d-d791d0218660.bs2io90l08kqb1od8lcg.databases.appdomain.cloud;PORT=31864;SECURITY=SSL;SSLSererCertificate=DigiCertGlobalRootCA.crt;UID=nrn19864;PWD=3qwwTpbwWRWevFb6",'','')
 
-# Intialize MySQL
-mysql = MySQL(app)
+#Index
+@app.route('/')
+def index():
+    return render_template('home.html')
 
-# SignUp Code (start)
-@app.route('/', methods=['GET', 'POST'])
-def signup():
-    msg = ''
-    if request.method == 'POST' and 'username' in request.form and 'email' in request.form and 'password' in request.form :
-        username = request.form['username']
-        email = request.form['email']
-        session["email"] = email
-        password = request.form['password']
-        cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
-        cursor.execute('SELECT * FROM accounts WHERE username = % s', (username, ))
-        account = cursor.fetchone()
-        if account:
-            msg = 'Account already exists !'
-        elif not re.match(r'[^@]+@[^@]+\.[^@]+', email):
-            msg = 'Invalid email address !'
-        elif not re.match(r'[A-Za-z0-9]+', username):
-            msg = 'username must contain only characters and numbers !'
-        elif not username or not password or not email:
-            msg = 'Please fill out the form !'
-        else:
-            cursor.execute('INSERT INTO accounts VALUES (NULL, % s, % s, % s)', (username, email, password ))
-            mysql.connection.commit()
-            msg = 'You have successfully registered !'
-            return render_template ('login.html')
-    elif request.method == 'POST':
-        msg = 'Please fill out the form !'
-    return render_template('register.html', msg = msg)
-# SignUp Code (End)
-#--------------------------------------------------------------------------------------------------------------------------------------#
-# Login Code (Start)
-@app.route('/login', methods=['GET','POST'])
-def login():
-    global email
-    msg = ''
-    if request.method == 'POST' and 'email' in request.form and 'password' in request.form:
-        email = request.form['email']
-        username = request.form['username']
-        password = request.form['password']
-        cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
-        cursor.execute('SELECT * FROM accounts WHERE email = % s AND password = % s AND username = % s', (email, password, username ))
-        account = cursor.fetchone()
-        if account:
-            session['loggedin'] = True
-            session['id'] = account['id']
-            session['email'] = account['email']
-            session['username'] = account['username']
-            msg = username
-            return render_template('home.html', msg = msg)
-        else:
-            msg = 'Incorrect email / password !'
-    return render_template('login.html', msg = msg)
-# Login Code (end)
-#--------------------------------------------------------------------------------------------------------------------------------------#
-# Home Page Code (START)
-@app.route('/home')
-def home():
-    if "username" in session:
-        username = session['username']
-        return render_template('home.html',msg = username)
+#Products
+@app.route('/products')
+def products():
+    sql = "SELECT * FROM products"
+    stmt = ibm_db.prepare(conn, sql)
+    result=ibm_db.execute(stmt)
+
+    products=[]
+    row = ibm_db.fetch_assoc(stmt)
+    while(row):
+        products.append(row)
+        row = ibm_db.fetch_assoc(stmt)
+    products=tuple(products)
+    #print(products)
+
+    if result>0:
+        return render_template('products.html', products = products)
     else:
-        return redirect(url_for("login"))
-# Home Page Code (end)
-#--------------------------------------------------------------------------------------------------------------------------------------#
-# STOCK page code (START)
-@app.route("/stockbalance")
-def stockbalance():
-    if "username" in session:
-        cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
-        cursor.execute("select * from Products")
-   
-        rows = cursor.fetchall();
-        username = session['username']
-        return  render_template('stock.html',rows = rows, msg = username) 
+        msg='No products found'
+        return render_template('products.html', msg=msg)
+
+#Locations
+@app.route('/locations')
+def locations():
+
+    sql = "SELECT * FROM locations"
+    stmt = ibm_db.prepare(conn, sql)
+    result=ibm_db.execute(stmt)
+
+    locations=[]
+    row = ibm_db.fetch_assoc(stmt)
+    while(row):
+        locations.append(row)
+        row = ibm_db.fetch_assoc(stmt)
+    locations=tuple(locations)
+    #print(locations)
+
+    if result>0:
+        return render_template('locations.html', locations = locations)
     else:
-        return redirect(url_for("login"))
-# STOCK page code (END)
-#--------------------------------------------------------------------------------------------------------------------------------------#
-# Product Page Code (Start)
-@app.route('/product')
-def product():
-    if "username" in session:
-        cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
-        cursor.execute("select * from Products")
-        rows = products = cursor.fetchall()
-        username = session['username']
-        return render_template('Product.html',rows = rows, msg = username)
+        msg='No locations found'
+        return render_template('locations.html', msg=msg)
+
+#Product Movements
+@app.route('/product_movements')
+def product_movements():
+
+    sql = "SELECT * FROM productmovements"
+    stmt = ibm_db.prepare(conn, sql)
+    result=ibm_db.execute(stmt)
+
+    movements=[]
+    row = ibm_db.fetch_assoc(stmt)
+    while(row):
+        movements.append(row)
+        row = ibm_db.fetch_assoc(stmt)
+    movements=tuple(movements)
+    #print(movements)
+
+    if result>0:
+        return render_template('product_movements.html', movements = movements)
     else:
-        return redirect(url_for("login"))
-# Product Page Code (END)
-#--------------------------------------------------------------------------------------------------------------------------------------#
-#ADD Product Code (Start)
-@app.route('/addProduct',methods = ['POST','GET'])
-def addProduct():
-   if request.method == 'POST':
-      try:
-         productname = request.form['pn']
-         productdescription = request.form['pd']
-         productqty = request.form['pq']
-         cursor = mysql.connection.cursor()
-         cursor.execute('INSERT INTO Products VALUES (NULL, % s, % s, % s)',(productname, productdescription, productqty))
-         mysql.connection.commit()
-         flash('New Product Added')
-         msg = "Record added"
-         cursor.close()
-      except: 
-         msg = "error in  operation"
-      
-      finally:
-         return  redirect(url_for('product',msg=msg))
-#ADD Product Code (end)
-#--------------------------------------------------------------------------------------------------------------------------------------#
-#EDIT Product code (START)     
-@app.route('/editProduct',methods = ['POST'])
-def editProduct():
-   if request.method == 'POST' and 'ProductID' in request.form and 'NEWProductName' in request.form and 'NEWProductDescription' in request.form and 'NEWProductQty':
-      try:
-         productID = request.form['ProductID']
-         productName = request.form['NEWProductName']
-         productDescription=request.form['NEWProductDescription']
-         ProductQty=request.form['NEWProductQty']
-         zero = "0"
-         msg = "Product Edited "
-         
-         if ProductQty == zero:
-             email = session["email"]
-             cursor = mysql.connection.cursor()
-             email_alert (email)
-             flash('The Stock Alert Message Has been Sent')
-             cursor.execute("UPDATE Products SET QTY = % s WHERE productID = % s",(ProductQty,productID))
-             mysql.connection.commit()
-             cursor.close()
-             return  redirect(url_for('product'))
-         else:
-             cursor = mysql.connection.cursor()
-             flash('Product Edited')
-             cursor.execute("UPDATE Products SET productName = % s,productDescription = % s, QTY = % s WHERE productID = % s",(productName,productDescription,ProductQty,productID) )
-             mysql.connection.commit()
-             cursor.close()
-             return "Product Edited. Please press back.";
-      except:
-             msg = "error in operation"
-      finally:
-         #return "product edited"
-         return  redirect(url_for('product',msg=msg))
-# EDIT Product code (END)
-#--------------------------------------------------------------------------------------------------------------------------------------#
-# Delete Product CODE (start)        
-@app.route('/deleteProduct/<productID>')
-def deleteProduct(productID):
-      try:
-            cursor = mysql.connection.cursor()
-            cursor.execute("DELETE FROM Products WHERE productID = % s",(productID,))
-            
-            mysql.connection.commit()
-            flash('Product Deleted')
-            msg = "Product Deleted"
-      except:
-            msg = "error in operation"
-   
-      finally:
-            return  redirect(url_for('product',msg=msg))
-            cursor.close()
-# Delete Product CODE (END)  
-#--------------------------------------------------------------------------------------------------------------------------------------#    
-# Location Page CODE (START)
-@app.route("/location")
-def Location():
-  if "username" in session:
-   cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
-   cursor.execute("select * from Locations")
-   mysql.connection.commit()
-   rows = cursor.fetchall()
-   username = session['username']
-   return  render_template('Location.html',rows = rows, msg = username) 
-  else:
-     return redirect(url_for("login"))
-# Location Page CODE (END)
-#--------------------------------------------------------------------------------------------------------------------------------------#
-# ADD Locations CODE (START)
-@app.route('/addlocation',methods = ['POST'])
-def addlocation():
-   if request.method == 'POST':
-      try:
-         ln = request.form['ln']
+        msg='No product movements found'
+        return render_template('product_movements.html', msg=msg)
 
-         cursor = mysql.connection.cursor()
-         cursor.execute("INSERT INTO Locations (locationName) VALUES (% s)",(ln,))
-         flash('New Location Added')
-         mysql.connection.commit()
-         msg = "successfully added"
-      except:
-            msg = "error in operation"
-      
-      finally:
-            return  redirect(url_for('Location',msg=msg))
-            cursor.close()
-# ADD Locations CODE (END)
-#--------------------------------------------------------------------------------------------------------------------------------------#
-# Edit Location CODE (START)
-@app.route('/editlocation',methods = ['POST'])
-def editlocation():
-   if request.method == 'POST':
-      try:
-         locationID = request.form['locationID']
-         locationName = request.form['NEWLocationName']
-         cursor = mysql.connection.cursor()
-         cursor.execute("UPDATE Locations SET LocationName = % s WHERE LocationID = % s",(locationName,locationID) )
-         flash('Location Edited')
-         mysql.connection.commit()
-         msg = "location Edit Successfully"
-      except:
-         msg = "error operation"
-      
-      finally:
-         return  redirect(url_for('Location',msg=msg))
-         cursor.close()
-# Edit Location CODE (END)
-#--------------------------------------------------------------------------------------------------------------------------------------#
-# Delete Location CODE (START)
-@app.route('/deletelocation/<locationID>')
-def deletelocation(locationID):
-      try:
-          cursor = mysql.connection.cursor()
-          cursor.execute("DELETE FROM Locations WHERE LocationID = % s ",(locationID))
-          flash('Location Deleted')
-          mysql.connection.commit()
-          msg = "location Delete Successfully"
-      except:
-            msg = "error operation"
-   
-      finally:
-            return  redirect(url_for('Location',msg=msg))
-            cursor.close()
-# Delete Location CODE (END)
-#--------------------------------------------------------------------------------------------------------------------------------------#
-# pRODUCT mOVEMENT CODE (START)
-@app.route('/productmovement')
-def ProductMovement():
- if "username" in session:
-   cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
-   cursor.execute("select * from Product_movement")
-   
-   rows = cursor.fetchall()
+#Register Form Class
+class RegisterForm(Form):
+    name = StringField('Name', [validators.Length(min=1, max=50)])
+    username = StringField('Username', [validators.Length(min=1, max=25)])
+    email = StringField('Email', [validators.length(min=6, max=50)])
+    password = PasswordField('Password', [
+        validators.DataRequired(),
+        validators.EqualTo('confirm', message='Passwords do not match')
+    ])
+    confirm = PasswordField('Confirm Password')
 
-   cursor.execute("select * from Products")
-   productRows = cursor.fetchall()
+#user register
+@app.route('/register', methods=['GET','POST'])
+def register():
+    form = RegisterForm(request.form)
+    if request.method == 'POST' and form.validate():
+        name = form.name.data
+        email = form.email.data
+        username = form.username.data
+        password = sha256_crypt.encrypt(str(form.password.data))
 
-   cursor.execute("select * from Locations")
-   locationRows = cursor.fetchall()
-
-   for pr in productRows:
-      for lr in locationRows:
-         cursor.execute("SELECT * FROM Balance WHERE LocationName = % s AND ProductName = % s ",(lr["LocationName"],pr["ProductName"]))
-         data = cursor.fetchall()
-
-         if len(data) == 0:
-            cursor.execute("INSERT INTO Balance (LocationName, ProductName, qty)VALUES (% s,% s,% s)",(lr["LocationName"],pr["ProductName"],0))
-            mysql.connection.commit()
-   username = session['username']
-   return render_template('ProductMovement.html',rows = rows,  productRows = productRows, locationRows = locationRows, msg = username)
-   cursor.close()
- else:
-     return redirect(url_for("login"))
-# pRODUCT mOVEMENT CODE (END)
-#--------------------------------------------------------------------------------------------------------------------------------------#
-# ADD ProductMovement CODE (START)
-@app.route('/addProductMovement',methods = ['POST'])
-def addProductMovement():
-   if request.method == 'POST':
-      try:
-         pn = request.form['pn']
-         datetime = request.form['datetime']
-         fromlocation = request.form['fromlocation']
-         tolocation = request.form['tolocation']
-         pq =request.form['pq']
+        sql1="INSERT INTO users(name, email, username, password) VALUES(?,?,?,?)"
+        stmt1 = ibm_db.prepare(conn, sql1)
+        ibm_db.bind_param(stmt1,1,name)
+        ibm_db.bind_param(stmt1,2,email)
+        ibm_db.bind_param(stmt1,3,username)
+        ibm_db.bind_param(stmt1,4,password)
+        ibm_db.execute(stmt1)
+        #for flash messages taking parameter and the category of message to be flashed
+        flash("You are now registered and can log in", "success")
         
-         
-         cursor = mysql.connection.cursor()
-         cursor.execute("INSERT INTO Product_movement (ProductName,Timing,fromlocation,tolocation,QTY) VALUES (% s,% s,% s,% s,% s)",(pn,datetime,fromlocation,tolocation,pq) )
-         flash('Product Movement Added')
-         mysql.connection.commit()
-         msg = "Record added"
-      except:
-         msg = "error in  operation"
-      
-      finally:
-          return  redirect(url_for('ProductMovement',msg=msg))
-          cursor.close()
-# ADD ProductMovement CODE (END)
-#--------------------------------------------------------------------------------------------------------------------------------------#
-# Edit ProductMovement CODE (START) 
-@app.route('/editProductMovement',methods = ['POST'])
-def editProductMovement():
-   if request.method == 'POST':
-      try:
-         movementID = request.form['movementID']
-         ProductName = request.form['NEWProductName']
-         datetime = request.form['NEWDateTime']
-         fromlocation = request.form['NEWfromlocation']
-         tolocation = request.form['NEWtolocation']
-         qty=request.form['NEWProductQty']
-         cursor = mysql.connection.cursor()
-         cursor.execute("UPDATE Product_movement SET ProductName = % s,Timing = % s,fromlocation = % s,tolocation = % s,QTY = % s WHERE movementID = % s",(ProductName,datetime,fromlocation,tolocation,qty,movementID),)
-         flash('Product Movement Edited')
-         mysql.connection.commit()
-         msg = " movement Edit Successfully"
-      except:
-         msg = "error operation"
-      
-      finally:
-         return  redirect(url_for('ProductMovement',msg=msg))
-         cursor.close()
-# Edit ProductMovement CODE (END) 
-#--------------------------------------------------------------------------------------------------------------------------------------#
-# Delete Product Movement CODE (START)
-@app.route('/deleteprouctmovement/<movementID>')
-def deleteprouctmovement(movementID):
-      try:
-            cursor = mysql.connection.cursor()
-            cursor.execute("DELETE FROM Product_movement WHERE movementID = % s ",(movementID))
-            flash('Product Movement Deleted')
-            mysql.connection.commit()
-            msg = "movement Delete Successfully"
-      except:
-            msg = "error operation"
-   
-      finally:
-            return  redirect(url_for('ProductMovement',msg=msg))
-            cursor.close()
-# Delete Product Movement CODE (END)
-#--------------------------------------------------------------------------------------------------------------------------------------#
-# EXPORT CODE (START)
-@app.route('/download/report/excel')
-def download_report():
-		cursor = mysql.connection.cursor()
-		cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
-		
-		cursor.execute("SELECT ProductID, ProductName, ProductDescription, QTY FROM Products")
-		result = cursor.fetchall()
-		
-		#output in bytes
-		output = io.BytesIO()
-		#create WorkBook object
-		workbook = xlwt.Workbook()
-		#add a sheet
-		sh = workbook.add_sheet('Stock Products')
-		
-		#add headers
-		sh.write(0, 0, 'Product Id')
-		sh.write(0, 1, 'Product Name')
-		sh.write(0, 2, 'Product Description')
-		sh.write(0, 3, 'QTY')
-		
-		idx = 0
-		for row in result:
-			sh.write(idx+1, 0, str(row['ProductID']))
-			sh.write(idx+1, 1, row['ProductName'])
-			sh.write(idx+1, 2, row['ProductDescription'])
-			sh.write(idx+1, 3, row['QTY'])
-			idx += 1
-		
-		workbook.save(output)
-		output.seek(0)
-		
-		return Response(output, mimetype="application/ms-excel", headers={"Content-Disposition":"attachment;filename=Stock_products.xls"})
-# export code (closed)
-#--------------------------------------------------------------------------------------------------------------------------------------#
-# Logout CODE (START)
+        #when registration is successful redirect to home
+        return redirect(url_for('login'))
+    return render_template('register.html', form = form)
+
+
+#User login
+@app.route('/login', methods = ['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        #Get form fields
+        username = request.form['username']
+        password_candidate = request.form['password']
+
+        sql1="Select * from users where username = ?"
+        stmt1 = ibm_db.prepare(conn, sql1)
+        ibm_db.bind_param(stmt1,1,username)
+        result=ibm_db.execute(stmt1)
+        d=ibm_db.fetch_assoc(stmt1)
+        if result > 0:
+            #Get the stored hash
+            data = d
+            password = data['PASSWORD']
+
+            #compare passwords
+            if sha256_crypt.verify(password_candidate, password):
+                #Passed
+                session['logged_in'] = True
+                session['username'] = username
+
+                flash("you are now logged in","success")
+                return redirect(url_for('dashboard'))
+            else:
+                error = 'Invalid Login'
+                return render_template('login.html', error=error)
+            #Close connection
+            cur.close()
+        else:
+            error = 'Username not found'
+            return render_template('login.html', error=error)
+    return render_template('login.html')
+
+#check if user logged in
+def is_logged_in(f):
+    @wraps(f)
+    def wrap(*args, **kwargs):
+        if 'logged_in' in session:
+            return f(*args, **kwargs)
+        else:
+            flash('Unauthorized, Please login','danger')
+            return redirect(url_for('login'))
+    return wrap
+
+#Logout
 @app.route('/logout')
+@is_logged_in
 def logout():
-   session.pop('loggedin', None)
-   session.pop('id', None)
-   session.pop('username', None)
-   return render_template('login.html')
-# LOGOUT CODE (END)
-#--------------------------------------------------------------------------------------------------------------------------------------#
+    session.clear()
+    flash("You are now logged out", "success")
+    return redirect(url_for('login'))
+
+#Dashboard
+@app.route('/dashboard')
+@is_logged_in
+def dashboard():
+    sql2="SELECT product_id, location_id, qty FROM product_balance"
+    sql3="SELECT location_id FROM locations"
+    stmt2 = ibm_db.prepare(conn, sql2)
+    stmt3 = ibm_db.prepare(conn, sql3)
+
+    result=ibm_db.execute(stmt2)
+    ibm_db.execute(stmt3)
+
+
+    products=[]
+    row = ibm_db.fetch_assoc(stmt2)
+    while(row):
+        products.append(row)
+        row = ibm_db.fetch_assoc(stmt2)
+    products=tuple(products)
+
+    locations=[]
+    row2 = ibm_db.fetch_assoc(stmt3)
+    while(row2):
+        locations.append(row2)
+        row2 = ibm_db.fetch_assoc(stmt3)
+    locations=tuple(locations)
+
+    locs = []
+    for i in locations:
+        locs.append(list(i.values())[0])
+
+    if result>0:
+        return render_template('dashboard.html', products = products, locations = locs)
+    else:
+        msg='No products found'
+        return render_template('dashboard.html', msg=msg)
+
+#Product Form Class
+class ProductForm(Form):
+    product_id = StringField('Product ID', [validators.Length(min=1, max=200)])
+    product_cost = StringField('Product Cost', [validators.Length(min=1, max=200)])
+    product_num = StringField('Product Num', [validators.Length(min=1, max=200)])
+
+#Add Product
+@app.route('/add_product', methods=['GET', 'POST'])
+@is_logged_in
+def add_product():
+    form = ProductForm(request.form)
+    if request.method == 'POST' and form.validate():
+        product_id = form.product_id.data
+        product_cost = form.product_cost.data
+        product_num = form.product_num.data
+
+        sql1="INSERT INTO products(product_id, product_cost, product_num) VALUES(?,?,?)"
+        stmt1 = ibm_db.prepare(conn, sql1)
+        ibm_db.bind_param(stmt1,1,product_id)
+        ibm_db.bind_param(stmt1,2,product_cost)
+        ibm_db.bind_param(stmt1,3,product_num)
+        
+        ibm_db.execute(stmt1)
+
+        flash("Product Added", "success")
+
+        return redirect(url_for('products'))
+
+    return render_template('add_product.html', form=form)
+
+#Edit Product
+@app.route('/edit_product/<string:id>', methods=['GET', 'POST'])
+@is_logged_in
+def edit_product(id):
+    sql1="Select * from products where product_id = ?"
+    stmt1 = ibm_db.prepare(conn, sql1)    
+    ibm_db.bind_param(stmt1,1,id)
+    result=ibm_db.execute(stmt1)
+    product=ibm_db.fetch_assoc(stmt1)
+    
+    print(product)
+    #Get form
+    form = ProductForm(request.form)
+
+    #populate product form fields
+    form.product_id.data = product['PRODUCT_ID']
+    form.product_cost.data = str(product['PRODUCT_COST'])
+    form.product_num.data = str(product['PRODUCT_NUM'])
+
+    if request.method == 'POST' and form.validate():
+        product_id = request.form['product_id']
+        product_cost = request.form['product_cost']
+        product_num = request.form['product_num']
+
+        sql2="UPDATE products SET product_id=?,product_cost=?,product_num=? WHERE product_id=?"
+        stmt2 = ibm_db.prepare(conn, sql2)    
+        ibm_db.bind_param(stmt2,1,product_id)
+        ibm_db.bind_param(stmt2,2,product_cost)
+        ibm_db.bind_param(stmt2,3,product_num)
+        ibm_db.bind_param(stmt2,4,id)
+        ibm_db.execute(stmt2)
+
+        flash("Product Updated", "success")
+
+        return redirect(url_for('products'))
+
+    return render_template('edit_product.html', form=form)
+
+#Delete Product
+@app.route('/delete_product/<string:id>', methods=['POST'])
+@is_logged_in
+def delete_product(id):
+
+    sql2="DELETE FROM products WHERE product_id=?"
+    stmt2 = ibm_db.prepare(conn, sql2)    
+    ibm_db.bind_param(stmt2,1,id)
+    ibm_db.execute(stmt2)
+
+    flash("Product Deleted", "success")
+
+    return redirect(url_for('products'))
+
+#Location Form Class
+class LocationForm(Form):
+    location_id = StringField('Location ID', [validators.Length(min=1, max=200)])
+
+#Add Location
+@app.route('/add_location', methods=['GET', 'POST'])
+@is_logged_in
+def add_location():
+    form = LocationForm(request.form)
+    if request.method == 'POST' and form.validate():
+        location_id = form.location_id.data
+
+        sql2="INSERT into locations VALUES(?)"
+        stmt2 = ibm_db.prepare(conn, sql2)    
+        ibm_db.bind_param(stmt2,1,location_id)
+        ibm_db.execute(stmt2)
+
+        flash("Location Added", "success")
+
+        return redirect(url_for('locations'))
+
+    return render_template('add_location.html', form=form)
+
+#Edit Location
+@app.route('/edit_location/<string:id>', methods=['GET', 'POST'])
+@is_logged_in
+def edit_location(id):
+    
+    sql2="SELECT * FROM locations where location_id = ?"
+    stmt2 = ibm_db.prepare(conn, sql2)    
+    ibm_db.bind_param(stmt2,1,id)
+    result=ibm_db.execute(stmt2)
+    location=ibm_db.fetch_assoc(stmt2)
+    #Get form
+    form = LocationForm(request.form)
+    print(location)
+
+    #populate article form fields
+    form.location_id.data = location['LOCATION_ID']
+
+    if request.method == 'POST' and form.validate():
+        location_id = request.form['location_id']
+
+        sql2="UPDATE locations SET location_id=? WHERE location_id=?"
+        stmt2 = ibm_db.prepare(conn, sql2)    
+        ibm_db.bind_param(stmt2,1,location_id)
+        ibm_db.bind_param(stmt2,2,id)
+        ibm_db.execute(stmt2)
+
+        flash("Location Updated", "success")
+
+        return redirect(url_for('locations'))
+
+    return render_template('edit_location.html', form=form)
+
+#Delete Location
+@app.route('/delete_location/<string:id>', methods=['POST'])
+@is_logged_in
+def delete_location(id):
+    sql2="DELETE FROM locations WHERE location_id=?"
+    stmt2 = ibm_db.prepare(conn, sql2)    
+    ibm_db.bind_param(stmt2,1,id)
+    ibm_db.execute(stmt2)
+
+    flash("Location Deleted", "success")
+
+    return redirect(url_for('locations'))
+
+#Product Movement Form Class
+class ProductMovementForm(Form):
+    from_location = SelectField('From Location', choices=[])
+    to_location = SelectField('To Location', choices=[])
+    product_id = SelectField('Product ID', choices=[])
+    qty = IntegerField('Quantity')
+
+class CustomError(Exception):
+    pass
+
+#Add Product Movement
+@app.route('/add_product_movements', methods=['GET', 'POST'])
+@is_logged_in
+def add_product_movements():
+    form = ProductMovementForm(request.form) 
+
+    sql2="SELECT product_id FROM products"
+    sql3="SELECT location_id FROM locations"
+    stmt2 = ibm_db.prepare(conn, sql2)
+    stmt3 = ibm_db.prepare(conn, sql3)
+
+    result=ibm_db.execute(stmt2)
+    ibm_db.execute(stmt3)
+
+
+    products=[]
+    row = ibm_db.fetch_assoc(stmt2)
+    while(row):
+        products.append(row)
+        row = ibm_db.fetch_assoc(stmt2)
+    products=tuple(products)
+
+    locations=[]
+    row2 = ibm_db.fetch_assoc(stmt3)
+    while(row2):
+        locations.append(row2)
+        row2 = ibm_db.fetch_assoc(stmt3)
+    locations=tuple(locations)
+
+    prods = []
+    for p in products:
+        prods.append(list(p.values())[0])
+    
+    locs = []
+    for i in locations:
+        locs.append(list(i.values())[0])
+
+    form.from_location.choices = [(l,l) for l in locs]
+    form.from_location.choices.append(("Main Inventory","Main Inventory"))
+    form.to_location.choices = [(l,l) for l in locs]
+    form.to_location.choices.append(("Main Inventory","Main Inventory"))
+    form.product_id.choices = [(p,p) for p in prods]
+
+    if request.method == 'POST' and form.validate():
+        from_location = form.from_location.data
+        to_location = form.to_location.data
+        product_id = form.product_id.data
+        qty = form.qty.data
+
+
+        if from_location==to_location:
+            raise CustomError("Please Give different From and To Locations!!")
+
+
+        elif from_location=="Main Inventory":
+            sql2="SELECT * from product_balance where location_id=? and product_id=?"
+            stmt2 = ibm_db.prepare(conn, sql2)    
+            ibm_db.bind_param(stmt2,1,to_location)
+            ibm_db.bind_param(stmt2,2,product_id)
+            result=ibm_db.execute(stmt2)
+            result=ibm_db.fetch_assoc(stmt2)
+            print("-----------------")
+            print(result)
+            print("-----------------")
+            app.logger.info(result)
+            if result!=False:
+                if(len(result))>0:
+                    Quantity = result["QTY"]
+                    q = Quantity + qty 
+
+                    sql2="UPDATE product_balance set qty=? where location_id=? and product_id=?"
+                    stmt2 = ibm_db.prepare(conn, sql2)    
+                    ibm_db.bind_param(stmt2,1,q)
+                    ibm_db.bind_param(stmt2,2,to_location)
+                    ibm_db.bind_param(stmt2,3,product_id)
+                    ibm_db.execute(stmt2)
+
+                    sql2="INSERT into productmovements(from_location, to_location, product_id, qty) VALUES(?, ?, ?, ?)"
+                    stmt2 = ibm_db.prepare(conn, sql2)    
+                    ibm_db.bind_param(stmt2,1,from_location)
+                    ibm_db.bind_param(stmt2,2,to_location)
+                    ibm_db.bind_param(stmt2,3,product_id)
+                    ibm_db.bind_param(stmt2,4,qty)
+                    ibm_db.execute(stmt2)
+            else:   
+
+                sql2="INSERT into product_balance(product_id, location_id, qty) values(?, ?, ?)"
+                stmt2 = ibm_db.prepare(conn, sql2)    
+                ibm_db.bind_param(stmt2,1,product_id)
+                ibm_db.bind_param(stmt2,2,to_location)
+                ibm_db.bind_param(stmt2,3,qty)
+                ibm_db.execute(stmt2)
+
+                sql2="INSERT into productmovements(from_location, to_location, product_id, qty) VALUES(?, ?, ?, ?)"
+                stmt2 = ibm_db.prepare(conn, sql2)    
+                ibm_db.bind_param(stmt2,1,from_location)
+                ibm_db.bind_param(stmt2,2,to_location)
+                ibm_db.bind_param(stmt2,3,product_id)
+                ibm_db.bind_param(stmt2,4,qty)
+                ibm_db.execute(stmt2)
+            
+
+
+            sql = "select product_num from products where product_id=?"
+            stmt = ibm_db.prepare(conn, sql)
+            ibm_db.bind_param(stmt,1,product_id)
+            current_num=ibm_db.execute(stmt)
+            current_num = ibm_db.fetch_assoc(stmt)        
+
+            sql2="Update products set product_num=? where product_id=?"
+            stmt2 = ibm_db.prepare(conn, sql2)    
+            ibm_db.bind_param(stmt2,1,current_num['PRODUCT_NUM']-qty)
+            ibm_db.bind_param(stmt2,2,product_id)
+            ibm_db.execute(stmt2)
+
+            alert_num=current_num['PRODUCT_NUM']-qty
+
+            if(alert_num<=0):
+                alert("Please update the quantity of the product {}, Atleast {} number of pieces must be added to finish the pending Product Movements!".format(product_id,-alert_num))
+        
+        elif to_location=="Main Inventory":
+            sql2="SELECT * from product_balance where location_id=? and product_id=?"
+            stmt2 = ibm_db.prepare(conn, sql2)    
+            ibm_db.bind_param(stmt2,1,from_location)
+            ibm_db.bind_param(stmt2,2,product_id)
+            result=ibm_db.execute(stmt2)
+            result=ibm_db.fetch_assoc(stmt2)
+
+            app.logger.info(result)
+            if result!=False:
+                if(len(result))>0:
+                    Quantity = result["QTY"]
+                    q = Quantity - qty 
+
+                    sql2="UPDATE product_balance set qty=? where location_id=? and product_id=?"
+                    stmt2 = ibm_db.prepare(conn, sql2)    
+                    ibm_db.bind_param(stmt2,1,q)
+                    ibm_db.bind_param(stmt2,2,to_location)
+                    ibm_db.bind_param(stmt2,3,product_id)
+                    ibm_db.execute(stmt2)
+
+                    sql2="INSERT into productmovements(from_location, to_location, product_id, qty) VALUES(?, ?, ?, ?)"
+                    stmt2 = ibm_db.prepare(conn, sql2)    
+                    ibm_db.bind_param(stmt2,1,from_location)
+                    ibm_db.bind_param(stmt2,2,to_location)
+                    ibm_db.bind_param(stmt2,3,product_id)
+                    ibm_db.bind_param(stmt2,4,qty)
+                    ibm_db.execute(stmt2)
+
+                    flash("Product Movement Added", "success")
+
+
+                    sql = "select product_num from products where product_id=?"
+                    stmt = ibm_db.prepare(conn, sql)
+                    ibm_db.bind_param(stmt,1,product_id)
+                    current_num=ibm_db.execute(stmt)
+                    current_num = ibm_db.fetch_assoc(stmt)        
+
+                    sql2="Update products set product_num=? where product_id=?"
+                    stmt2 = ibm_db.prepare(conn, sql2)    
+                    ibm_db.bind_param(stmt2,1,current_num['PRODUCT_NUM']+qty)
+                    ibm_db.bind_param(stmt2,2,product_id)
+                    ibm_db.execute(stmt2)
+
+                    alert_num=q
+                    if(alert_num<=0):
+                        alert("Please Add {} number of {} to {} warehouse!".format(-q,product_id,from_location))
+            else:
+                raise CustomError("There is no product named {} in {}.".format(product_id,from_location))
+            
+
+
+        else: #will be executed if both from_location and to_location are specified
+            f=0
+            sql = "SELECT * from product_balance where location_id=? and product_id=?"
+            stmt = ibm_db.prepare(conn, sql)
+            ibm_db.bind_param(stmt,1,from_location)
+            ibm_db.bind_param(stmt,2,product_id)
+            result=ibm_db.execute(stmt)
+            result = ibm_db.fetch_assoc(stmt)
+
+            if result!=False:
+                if(len(result))>0:
+                    Quantity = result["QTY"]
+                    q = Quantity - qty 
+
+                    sql2="UPDATE product_balance set qty=? where location_id=? and product_id=?"
+                    stmt2 = ibm_db.prepare(conn, sql2)    
+                    ibm_db.bind_param(stmt2,1,q)
+                    ibm_db.bind_param(stmt2,2,from_location)
+                    ibm_db.bind_param(stmt2,3,product_id)
+                    ibm_db.execute(stmt2)
+                    f=1
+
+                    alert_num=q
+                    if(alert_num<=0):
+                        alert("Please Add {} number of {} to {} warehouse!".format(-q,product_id,from_location))
+
+            else:
+                raise CustomError("There is no product named {} in {}.".format(product_id,from_location))
+
+            if(f==1):
+                sql = "SELECT * from product_balance where location_id=? and product_id=?"
+                stmt = ibm_db.prepare(conn, sql)
+                ibm_db.bind_param(stmt,1,to_location)
+                ibm_db.bind_param(stmt,2,product_id)
+                result=ibm_db.execute(stmt)
+                result = ibm_db.fetch_assoc(stmt)
+
+                if result!=False:
+                    if(len(result))>0:
+                        Quantity = result["QTY"]
+                        q = Quantity + qty 
+
+                        sql2="UPDATE product_balance set qty=? where location_id=? and product_id=?"
+                        stmt2 = ibm_db.prepare(conn, sql2)    
+                        ibm_db.bind_param(stmt2,1,q)
+                        ibm_db.bind_param(stmt2,2,to_location)
+                        ibm_db.bind_param(stmt2,3,product_id)
+                        ibm_db.execute(stmt2)
+
+                else:
+            
+                    sql2="INSERT into product_balance(product_id, location_id, qty) values(?, ?, ?)"
+                    stmt2 = ibm_db.prepare(conn, sql2)    
+                    ibm_db.bind_param(stmt2,1,product_id)
+                    ibm_db.bind_param(stmt2,2,to_location)
+                    ibm_db.bind_param(stmt2,3,qty)
+                    ibm_db.execute(stmt2)
+                sql2="INSERT into productmovements(from_location, to_location, product_id, qty) VALUES(?, ?, ?, ?)"
+                stmt2 = ibm_db.prepare(conn, sql2)    
+                ibm_db.bind_param(stmt2,1,from_location)
+                ibm_db.bind_param(stmt2,2,to_location)
+                ibm_db.bind_param(stmt2,3,product_id)
+                ibm_db.bind_param(stmt2,4,qty)
+                ibm_db.execute(stmt2)
+
+                flash("Product Movement Added", "success")
+
+        render_template('products.html',form=form)
+
+
+        return redirect(url_for('product_movements'))
+
+    return render_template('add_product_movements.html', form=form)
+
+#Delete Product Movements
+@app.route('/delete_product_movements/<string:id>', methods=['POST'])
+@is_logged_in
+def delete_product_movements(id):
+
+    sql2="DELETE FROM productmovements WHERE movement_id=?"
+    stmt2 = ibm_db.prepare(conn, sql2)    
+    ibm_db.bind_param(stmt2,1,id)
+    ibm_db.execute(stmt2)
+
+    flash("Product Movement Deleted", "success")
+
+    return redirect(url_for('product_movements'))
+
 if __name__ == '__main__':
-   app.run(host ='0.0.0.0', port = 8080, debug = True)
+    app.secret_key = "secret123"
+    #when the debug mode is on, we do not need to restart the server again and again
+    app.run(debug=True)
