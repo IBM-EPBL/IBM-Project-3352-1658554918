@@ -11,8 +11,8 @@ app = Flask(__name__)
 
 app.secret_key='a'
 
-conn = ibm_db.connect("DATABASE=bludb;HOSTNAME=21fecfd8-47b7-4937-840d-d791d0218660.bs2io90l08kqb1od8lcg.databases.appdomain.cloud;PORT=31864;SECURITY=SSL;SSLSererCertificate=DigiCertGlobalRootCA.crt;UID=nrn19864;PWD=3qwwTpbwWRWevFb6",'','')
-
+conn = db.connect("DATABASE=bludb;HOSTNAME=98538591-7217-4024-b027-8baa776ffad1.c3n41cmd0nqnrk39u98g.databases.appdomain.cloud;PORT=30875;SECURITY=SSL;SSLServerCertificate=DigiCertGlobalRootCA.crt;UID=xwb32247;PWD=XLpYFeILredyL6gF;", '', '')
+print("connected..")
 #Index
 @app.route('/')
 def index():
